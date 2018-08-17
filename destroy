@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+env
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+
+export DEPLOY_ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+source "$DEPLOY_ROOT_DIR/src/common.bash"
+
+create_kubeconfig
+
+echo "Removing all pods..."
+kubectl delete all,ing -l "app=${CI_ENVIRONMENT_SLUG}" -n "$KUBE_NAMESPACE"
+kubectl delete all,ing -l "app=${CI_ENVIRONMENT_SLUG}-web" -n "$KUBE_NAMESPACE"
+kubectl delete all,ing -l "app=${CI_ENVIRONMENT_SLUG}-nginx" -n "$KUBE_NAMESPACE"
+kubectl delete all,ing -l "app=${CI_ENVIRONMENT_SLUG}-phpfpm" -n "$KUBE_NAMESPACE"
+kubectl delete "ing/${CI_ENVIRONMENT_SLUG}" -n "$KUBE_NAMESPACE"
