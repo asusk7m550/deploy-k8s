@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 
+# Process arguments
+while getopts s: option
+do
+	case "${option}"
+	in
+		s) SUBNAME=${OPTARG};;
+	esac
+done
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
 	DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
@@ -14,29 +23,30 @@ source "$DEPLOY_ROOT_DIR/src/common.bash"
 echo "Checking docker engine..."
 ensure_docker_engine
 
+docker rm -f "$CI_CONTAINER_NAME" &>/dev/null || true
+
+echo "Building application..."
+
 if [[ -n "$CI_BUILD_TOKEN" ]]; then
 	echo "Logging to GitLab Container Registry with CI credentials..."
 	docker login -u gitlab-ci-token -p "$CI_BUILD_TOKEN" "$CI_REGISTRY"
 	echo ""
 fi
 
-for Dockerfile in $(ls .k8s/Dockerfile*); do
+if [[ -n "${SUBNAME}" ]]; then
+	DOCKERFILE="Dockerfile_${SUBNAME}"
+	CI_REGISTRY_IMAGE="${CI_REGISTRY_IMAGE}/${SUBNAME}"
+else
+	DOCKERFILE="Dockerfile"
+fi
 
-  D_NAME=${Dockerfile/\.k8s\/Dockerfile\./}
-
-  docker rm -f "${CI_CONTAINER_NAME}-${D_NAME}" &>/dev/null || true
-
-  echo "Building application..."
-
-  if [[ -f $Dockerfile ]]; then
+if [[ -f ${DOCKERFILE} ]]; then
 	echo "Building Dockerfile-based application..."
-
 	# Build Dockerfile
-	docker build -t "${CI_REGISTRY_IMAGE}/${D_NAME}:${CI_BUILD_REF}-${CI_PIPELINE_ID}" -t "${CI_REGISTRY_IMAGE}/${D_NAME}:${CI_COMMIT_REF_SLUG}" -f $Dockerfile .
-  fi
+	docker build -f ${DOCKERFILE} -t "$CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG" -t "$CI_REGISTRY_IMAGE:latest" .
+fi
 
-  echo "Pushing to GitLab Container Registry..."
-  docker push "${CI_REGISTRY_IMAGE}/${D_NAME}:${CI_BUILD_REF}-${CI_PIPELINE_ID}"
-  echo ""
-
-done
+echo "Pushing to GitLab Container Registry..."
+docker push "$CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG"
+docker push "$CI_REGISTRY_IMAGE:latest"
+echo ""

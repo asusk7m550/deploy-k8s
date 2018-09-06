@@ -1,7 +1,7 @@
 FROM docker:dind
 
 # Install requirements
-RUN apk add -U openssh-client openssl curl tar gzip bash ca-certificates && \
+RUN apk add -U jq openssh-client openssl curl tar gzip bash ca-certificates && \
   wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub && \
   wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.23-r3/glibc-2.23-r3.apk && \
   apk add glibc-2.23-r3.apk && \
@@ -30,9 +30,10 @@ ENV PATH=/opt/kubernetes-deploy:$PATH
 COPY / /opt/kubernetes-deploy/
 RUN ln -s /opt/kubernetes-deploy/run /usr/bin/deploy && \
   which deploy && \
-  which destroy && \
+  which canary && \
+  which build && \
   which run-test && \
-  which build
+  which destroy
 
 ENTRYPOINT []
 CMD []

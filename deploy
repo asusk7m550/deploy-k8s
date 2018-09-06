@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-env
-
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
@@ -17,27 +15,8 @@ ensure_environment_url
 ensure_deploy_variables
 create_kubeconfig
 
-CI_ENVIRONMENT_HOSTNAME="${CI_ENVIRONMENT_URL}"
-CI_ENVIRONMENT_HOSTNAME="${CI_ENVIRONMENT_HOSTNAME/http:\/\//}"
-CI_ENVIRONMENT_HOSTNAME="${CI_ENVIRONMENT_HOSTNAME/https:\/\//}"
-
-cat <<EOF | kubectl apply -f -
-kind: Namespace
-apiVersion: v1
-metadata:
-  name: $KUBE_NAMESPACE
-EOF
-
-kubectl create secret -n $KUBE_NAMESPACE \
-  docker-registry gitlab-registry \
-  --docker-server="$CI_REGISTRY" \
-  --docker-username="$CI_REGISTRY_USER" \
-  --docker-password="$CI_REGISTRY_PASSWORD" \
-  --docker-email="$GITLAB_USER_EMAIL" \
-  -o yaml --dry-run | kubectl replace -n $KUBE_NAMESPACE --force -f -
-
 track="${1-stable}"
-name="$CI_ENVIRONMENT_SLUG"
+name="${CI_PROJECT_NAME,,}"
 
 if [[ "$track" != "stable" ]]; then
   name="$name-$track"
@@ -49,117 +28,19 @@ env_track="${track^^}"
 env_slug="${CI_ENVIRONMENT_SLUG//-/_}"
 env_slug="${env_slug^^}"
 
-if [[ "$track" == "stable" ]]; then
-  # for stable track get number of replicas from `PRODUCTION_REPLICAS`
-  eval new_replicas=\$${env_slug}_REPLICAS
-  if [[ -n "$new_replicas" ]]; then
-    replicas="$new_replicas"
-  fi
-else
-  # for all tracks get number of replicas from `CANARY_PRODUCTION_REPLICAS`
-  eval new_replicas=\$${env_track}_${env_slug}_REPLICAS
-  if [[ -n "$new_replicas" ]]; then
-    replicas="$new_replicas"
-  fi
-fi
-
-echo "Create k8s files for $CI_ENVIRONMENT_SLUG"
-mkdir -p /tmp/k8s_deploy /tmp/k8s_service
-for Dockerfile in $(ls .k8s/Dockerfile*); do
-
-  D_NAME=${Dockerfile/\.k8s\/Dockerfile\./}
-
-  REPL_NAME=REPLICATION_${D_NAME}
-  NR_OF_REPL=${!REPL_NAME}
-
-  PORT_NAME=PORT_${D_NAME}
-  PORT_NR=${!PORT_NAME}
-
-  TIER_NAME=TIER_${D_NAME}
-  TIER=${!TIER_NAME}
-
-  cat > /tmp/k8s_deploy/${D_NAME}.yaml <<EOF
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: ${name}-${D_NAME}
-spec:
-  replicas: ${NR_OF_REPL}
-  template:
-    metadata:
-      labels:
-        app: ${CI_ENVIRONMENT_SLUG}-${D_NAME}
-        tier: ${TIER}
-    spec:
-      imagePullSecrets:
-      - name: gitlab-registry
-      containers:
-      - name: ${CI_ENVIRONMENT_SLUG}-${D_NAME}
-        image: ${CI_REGISTRY_IMAGE}/${D_NAME}:${CI_BUILD_REF}-${CI_PIPELINE_ID}
-        ports:
-        - containerPort: ${PORT_NR}
-        readinessProbe:
-          tcpSocket:
-            port: ${PORT_NR}
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          tcpSocket:
-            port: ${PORT_NR}
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        env:
-        - name: PHP_HOST
-          value: $CI_ENVIRONMENT_SLUG-phpfpm
-EOF
-
-  cat > /tmp/k8s_service/${D_NAME}.yaml <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${CI_ENVIRONMENT_SLUG}-${D_NAME}
-spec:
-  ports:
-    - protocol: TCP
-      port: ${PORT_NR}
-      targetPort: ${PORT_NR}
-  selector:
-    app: ${CI_ENVIRONMENT_SLUG}-${D_NAME}
-    tier: ${TIER}
-EOF
-
-done
-
-cat > /tmp/k8s_ingress.yaml <<EOF
-apiVersion: extensions/v1beta1
-kind: Ingress
-metadata:
-  name: $CI_ENVIRONMENT_SLUG
-spec:
-  rules:
-  - host: $CI_ENVIRONMENT_HOSTNAME
-    http:
-      paths:
-      - path: /
-        backend:
-          serviceName: ${CI_ENVIRONMENT_SLUG}-web
-          servicePort: 80
-EOF
-
-echo "Deploying $CI_ENVIRONMENT_SLUG (track: $track, replicas: $replicas) with ${CI_REGISTRY_IMAGE}/${D_NAME}:${CI_BUILD_REF}-${CI_PIPELINE_ID}..."
-cat /tmp/k8s_deploy/*
-kubectl apply -n $KUBE_NAMESPACE --force -f /tmp/k8s_deploy/
-
-cat /tmp/k8s_service/*
-kubectl apply -n $KUBE_NAMESPACE --force -f /tmp/k8s_service/
-
-kubectl apply -n $KUBE_NAMESPACE --force -f /tmp/k8s_ingress.yaml
+echo "Deploying $CI_ENVIRONMENT_SLUG (track: $track, replicas: $replicas) with $CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG..."
+kubectl apply -n $KUBE_NAMESPACE -f ${CI_PROJECT_DIR}/.k8s/ -o json > /tmp/out.json
 
 echo "Waiting for deployment..."
-for Dockerfile in $(ls .k8s/Dockerfile*); do
-  D_NAME=${Dockerfile/\.k8s\/Dockerfile\./}
-  kubectl rollout status -n "$KUBE_NAMESPACE" -w "deployment/${name}-${D_NAME}"
+DEPLOYMENTS=$(cat /tmp/out.json | jq 'if .kind == "List" then .["items"][] else . end' | jq '. | select(."kind" == "Deployment")' | jq -r '.metadata.name')
+for DEPLOYMENT in $DEPLOYMENTS; do
+  kubectl rollout status -n "$KUBE_NAMESPACE" -w "deploy/${DEPLOYMENT}"
 done
 
-echo "Application is accessible at: ${CI_ENVIRONMENT_URL}"
+if [[ "$track" == "stable" ]]; then
+  echo "Removing canary deployments (if found)..."
+  kubectl delete all,ing -l "app=$CI_ENVIRONMENT_SLUG" -l "track=canary" -n "$KUBE_NAMESPACE"
+fi
+
+echo "Application is deployed"
 echo ""

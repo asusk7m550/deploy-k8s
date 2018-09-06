@@ -2,11 +2,14 @@
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
-  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+	DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+	SOURCE="$(readlink "$SOURCE")"
+	[[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 
-apk add --no-cache wget ca-certificates && wget -O /etc/apk/keys/phpearth.rsa.pub https://repos.php.earth/alpine/phpearth.rsa.pub && echo "https://repos.php.earth/alpine/v3.7" >> /etc/apk/repositories && apk add --no-cache phpunit php
+export DEPLOY_ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-cd ${CI_PROJECT_DIR}/html && phpunit
+source "$DEPLOY_ROOT_DIR/src/common.bash"
+
+echo "Checking docker engine..."
+ensure_docker_engine
