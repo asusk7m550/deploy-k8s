@@ -43,10 +43,11 @@ fi
 if [[ -f ${DOCKERFILE} ]]; then
 	echo "Building Dockerfile-based application..."
 	# Build Dockerfile
-	docker build -f ${DOCKERFILE} -t "$CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG" -t "$CI_REGISTRY_IMAGE:latest" .
+	docker build -f ${DOCKERFILE} -t "$CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG" -t "$CI_REGISTRY_IMAGE:latest" -t "$CI_REGISTRY_IMAGE:$CI_PIPELINE_ID" .
 fi
 
 echo "Pushing to GitLab Container Registry..."
 docker push "$CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG"
+docker push "$CI_REGISTRY_IMAGE:$CI_PIPELINE_ID"
 docker push "$CI_REGISTRY_IMAGE:latest"
 echo ""

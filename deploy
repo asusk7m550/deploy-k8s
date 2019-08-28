@@ -29,6 +29,7 @@ env_slug="${CI_ENVIRONMENT_SLUG//-/_}"
 env_slug="${env_slug^^}"
 
 echo "Deploying $CI_ENVIRONMENT_SLUG (track: $track, replicas: $replicas) with $CI_REGISTRY_IMAGE:$CI_REGISTRY_TAG..."
+sed -i -e s/CI_PIPELINE_ID/$CI_PIPELINE_ID/g -e s/CI_ENVIRONMENT_SLUG/$CI_ENVIRONMENT_SLUG/g -e s/FQDN/$FQDN/g ${CI_PROJECT_DIR}/.k8s/*.yaml
 kubectl apply -n $KUBE_NAMESPACE -f ${CI_PROJECT_DIR}/.k8s/ -o json > /tmp/out.json
 
 echo "Waiting for deployment..."
@@ -42,5 +43,5 @@ if [[ "$track" == "stable" ]]; then
   kubectl delete all,ing -l "app=$CI_ENVIRONMENT_SLUG" -l "track=canary" -n "$KUBE_NAMESPACE"
 fi
 
-echo "Application is deployed"
+echo "Application is accessible at: ${CI_ENVIRONMENT_URL}"
 echo ""
